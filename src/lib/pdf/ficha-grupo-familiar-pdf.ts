@@ -1,7 +1,6 @@
 // src/lib/pdf/ficha-grupo-familiar-pdf.ts
 
 import type { ClienteCompleto } from "@/types/cliente-types";
-import { descargarFichaClientePdf } from "./ficha-cliente-pdf";
 
 type GrupoFamiliar = {
   id: string;
@@ -16,8 +15,26 @@ type MiembroConDatos = {
 };
 
 /**
- * Genera PDFs individuales para cada miembro del grupo familiar
- * Patrón Composite: agrupa múltiples descargas individuales
+ * Formatea una fecha extrayendo sus componentes en UTC para evitar desfase
+ * de zona horaria cuando PostgreSQL entrega fechas como medianoche UTC.
+ */
+function formatDateUTC(val: Date | string | null | undefined): string | null {
+  if (!val) return null;
+  try {
+    const d = typeof val === "string" ? new Date(val) : val;
+    if (Number.isNaN(d.getTime())) return null;
+    const day = String(d.getUTCDate()).padStart(2, "0");
+    const month = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const year = d.getUTCFullYear();
+    return `${day}/${month}/${year}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Genera un PDF único con fichas individuales para cada miembro del grupo familiar.
+ * Patrón Composite: agrupa múltiples fichas en un solo documento descargable.
  */
 export async function descargarFichasGrupoFamiliarPdf(
   grupo: GrupoFamiliar,
@@ -25,7 +42,6 @@ export async function descargarFichasGrupoFamiliarPdf(
 ): Promise<void> {
   const { jsPDF } = await import("jspdf");
 
-  // Crear documento maestro
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   let primeraFicha = true;
 
@@ -34,13 +50,9 @@ export async function descargarFichasGrupoFamiliarPdf(
       doc.addPage();
     }
     primeraFicha = false;
-
-    // Generar ficha individual para este miembro
-    // (Aquí delegamos a la función existente)
     await generarFichaEnDoc(doc, miembro.cliente, miembro, grupo);
   }
 
-  // Descargar archivo único con todas las fichas
   const nombreArchivo = `grupo-${grupo.nombre
     .toLowerCase()
     .replace(/\s+/g, "-")
@@ -50,7 +62,7 @@ export async function descargarFichasGrupoFamiliarPdf(
 }
 
 /**
- * Genera ficha de cliente dentro de un documento existente
+ * Renderiza la ficha de un miembro dentro de un documento jsPDF existente.
  */
 async function generarFichaEnDoc(
   doc: any,
@@ -66,7 +78,6 @@ async function generarFichaEnDoc(
 
   let y = 20;
 
-  // Header con info del grupo
   doc.setFillColor(...COLOR_PRIMARIO);
   doc.rect(0, 0, 210, 18, "F");
 
@@ -79,7 +90,6 @@ async function generarFichaEnDoc(
   doc.setFontSize(8);
   doc.text(grupo.nombre, MARGEN_DER, 11, { align: "right" });
 
-  // Rol en el grupo
   doc.setTextColor(...COLOR_TEXTO);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
@@ -87,13 +97,12 @@ async function generarFichaEnDoc(
     ? "TITULAR"
     : miembro.parentesco.nombre.toUpperCase();
   doc.text(rol, MARGEN_IZQ, y + 6);
-
   y += 10;
+
   doc.setFontSize(14);
   doc.text(`${cliente.nombres} ${cliente.apellidos}`, MARGEN_IZQ, y);
   y += 10;
 
-  // Datos básicos en formato compacto
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
 
@@ -113,20 +122,13 @@ async function generarFichaEnDoc(
   agregarCampo("Email", cliente.email);
   agregarCampo("Teléfono", cliente.telefonoCelular);
   agregarCampo("Región", cliente.region?.nombre);
+  agregarCampo("Fecha Nacimiento", formatDateUTC(cliente.fechaNacimiento));
 
-  if (cliente.fechaNacimiento) {
-    agregarCampo(
-      "Fecha Nacimiento",
-      new Date(cliente.fechaNacimiento).toLocaleDateString("es-BO"),
-    );
-  }
-
-  // Nota al pie
   y = 280;
   doc.setFontSize(7);
   doc.setTextColor(...COLOR_LABEL);
   doc.text(
-    `Grupo: ${grupo.nombre} • Generado: ${new Date().toLocaleDateString("es-BO")}`,
+    `Grupo: ${grupo.nombre} • Generado: ${new Date().toLocaleDateString("es-BO", { timeZone: "America/La_Paz" })}`,
     105,
     y,
     { align: "center" },

@@ -1,5 +1,4 @@
 // src/lib/pdf/ficha-cliente-pdf.ts
-// ARCHIVO COMPLETO con datos de viaje incluidos
 
 import type { ClienteCompleto } from "@/types/cliente-types";
 
@@ -7,27 +6,35 @@ type Campo = { label: string; value: string };
 type Seccion = { titulo: string; campos: Campo[] };
 
 /**
- * Construye las secciones de la ficha filtrando campos sin datos
- * Implementa patrón Builder para construir el documento dinámicamente
+ * Formatea una fecha extrayendo sus componentes en UTC para evitar desfase
+ * de zona horaria cuando PostgreSQL entrega fechas como medianoche UTC.
+ */
+function formatDateUTC(val: Date | string | null | undefined): string | null {
+  if (!val) return null;
+  try {
+    const d = typeof val === "string" ? new Date(val) : val;
+    if (Number.isNaN(d.getTime())) return null;
+    const day = String(d.getUTCDate()).padStart(2, "0");
+    const month = d.toLocaleString("es-BO", {
+      month: "long",
+      timeZone: "UTC",
+    });
+    const year = d.getUTCFullYear();
+    return `${day} de ${month} de ${year}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Construye las secciones de la ficha filtrando campos sin datos.
+ * Implementa patrón Builder para construir el documento dinámicamente.
  */
 function buildSecciones(cliente: ClienteCompleto): Seccion[] {
   const secciones: Seccion[] = [];
 
   const fmt = (val: string | null | undefined) =>
     val && val.trim() !== "" ? val : null;
-
-  const fmtDate = (val: Date | string | null | undefined) => {
-    if (!val) return null;
-    try {
-      return new Date(val).toLocaleDateString("es-BO", {
-        day: "2-digit",
-        month: "long",
-        year: "numeric",
-      });
-    } catch {
-      return null;
-    }
-  };
 
   const fmtMoney = (val: number | null | undefined) =>
     val != null ? `${val.toLocaleString("es-BO")} Bs.` : null;
@@ -37,7 +44,6 @@ function buildSecciones(cliente: ClienteCompleto): Seccion[] {
       .filter(([, v]) => v !== null)
       .map(([label, value]) => ({ label, value: value as string }));
 
-  // ── Datos Básicos ──────────────────────────────────────────────────────────
   const basicos = campos([
     ["Nombres", fmt(cliente.nombres)],
     ["Apellidos", fmt(cliente.apellidos)],
@@ -46,7 +52,7 @@ function buildSecciones(cliente: ClienteCompleto): Seccion[] {
       cliente.tipoCliente === "ADULTO" ? "Adulto" : "Infante",
     ],
     ["Región", fmt(cliente.region?.nombre)],
-    ["Fecha de Nacimiento", fmtDate(cliente.fechaNacimiento)],
+    ["Fecha de Nacimiento", formatDateUTC(cliente.fechaNacimiento)],
     ["Lugar de Nacimiento", fmt(cliente.lugarNacimiento)],
     ["Nacionalidad", fmt(cliente.nacionalidad)],
     ["Número de CI", fmt(cliente.numeroCi)],
@@ -58,27 +64,25 @@ function buildSecciones(cliente: ClienteCompleto): Seccion[] {
   if (basicos.length > 0)
     secciones.push({ titulo: "Datos Básicos", campos: basicos });
 
-  // ── Datos Personales ───────────────────────────────────────────────────────
   if (cliente.datosPersonales) {
     const dp = cliente.datosPersonales;
     const personales = campos([
-      ["Emisión de Pasaporte", fmtDate(dp.pasaporteFechaEmision)],
-      ["Expiración de Pasaporte", fmtDate(dp.pasaporteFechaExpiracion)],
+      ["Emisión de Pasaporte", formatDateUTC(dp.pasaporteFechaEmision)],
+      ["Expiración de Pasaporte", formatDateUTC(dp.pasaporteFechaExpiracion)],
       ["Facebook", fmt(dp.facebook)],
       ["Instagram", fmt(dp.instagram)],
       ["Dirección de Domicilio", fmt(dp.direccionDomicilio)],
       ["Estado Civil", fmt(dp.estadoCivil)],
       ["Profesión", fmt(dp.profesion)],
       ["Nombre del Padre", fmt(dp.nombrePadre)],
-      ["Nacimiento del Padre", fmtDate(dp.fechaNacimientoPadre)],
+      ["Nacimiento del Padre", formatDateUTC(dp.fechaNacimientoPadre)],
       ["Nombre de la Madre", fmt(dp.nombreMadre)],
-      ["Nacimiento de la Madre", fmtDate(dp.fechaNacimientoMadre)],
+      ["Nacimiento de la Madre", formatDateUTC(dp.fechaNacimientoMadre)],
     ]);
     if (personales.length > 0)
       secciones.push({ titulo: "Datos Personales", campos: personales });
   }
 
-  // ── Datos Laborales ────────────────────────────────────────────────────────
   if (cliente.datosLaborales) {
     const dl = cliente.datosLaborales;
     const laborales = campos([
@@ -87,19 +91,18 @@ function buildSecciones(cliente: ClienteCompleto): Seccion[] {
       ["Descripción del Trabajo", fmt(dl.descripcionTrabajo)],
       ["Dirección de Trabajo", fmt(dl.direccionTrabajo)],
       ["Teléfono de Trabajo", fmt(dl.telefonoTrabajo)],
-      ["Fecha de Contratación", fmtDate(dl.fechaContratacion)],
+      ["Fecha de Contratación", formatDateUTC(dl.fechaContratacion)],
       ["Percepción Salarial", fmtMoney(dl.percepcionSalarial)],
       ["Trabajo Anterior", fmt(dl.nombreTrabajoAnterior)],
       ["Teléfono Trabajo Anterior", fmt(dl.telefonoTrabajoAnterior)],
       ["Dirección Trabajo Anterior", fmt(dl.direccionTrabajoAnterior)],
-      ["Inicio Trabajo Anterior", fmtDate(dl.fechaInicioTrabajoAnterior)],
+      ["Inicio Trabajo Anterior", formatDateUTC(dl.fechaInicioTrabajoAnterior)],
       ["Referencia Trabajo Anterior", fmt(dl.referenciaTrabajoAnterior)],
     ]);
     if (laborales.length > 0)
       secciones.push({ titulo: "Datos Laborales", campos: laborales });
   }
 
-  // ── Datos Académicos ───────────────────────────────────────────────────────
   if (cliente.datosAcademicos) {
     const da = cliente.datosAcademicos;
     const academicos = campos([
@@ -107,28 +110,26 @@ function buildSecciones(cliente: ClienteCompleto): Seccion[] {
       ["Carrera", fmt(da.carreraEstudio)],
       ["Dirección de Estudio", fmt(da.direccionEstudio)],
       ["Teléfono de Estudio", fmt(da.telefonoEstudio)],
-      ["Inicio de Estudios", fmtDate(da.fechaInicioEstudio)],
-      ["Fin de Estudios", fmtDate(da.fechaFinEstudio)],
+      ["Inicio de Estudios", formatDateUTC(da.fechaInicioEstudio)],
+      ["Fin de Estudios", formatDateUTC(da.fechaFinEstudio)],
     ]);
     if (academicos.length > 0)
       secciones.push({ titulo: "Datos Académicos", campos: academicos });
   }
 
-  // ── Datos Matrimoniales ────────────────────────────────────────────────────
   if (cliente.datosMatrimoniales) {
     const dm = cliente.datosMatrimoniales;
     const matrimoniales = campos([
       ["Nombre del Cónyuge", fmt(dm.conyugeNombreCompleto)],
-      ["Nacimiento del Cónyuge", fmtDate(dm.conyugeFechaNacimiento)],
+      ["Nacimiento del Cónyuge", formatDateUTC(dm.conyugeFechaNacimiento)],
       ["Lugar de Nacimiento del Cónyuge", fmt(dm.conyugeLugarNacimiento)],
-      ["Inicio del Matrimonio", fmtDate(dm.matrimonioFechaInicio)],
-      ["Fin del Matrimonio", fmtDate(dm.matrimonioFechaFin)],
+      ["Inicio del Matrimonio", formatDateUTC(dm.matrimonioFechaInicio)],
+      ["Fin del Matrimonio", formatDateUTC(dm.matrimonioFechaFin)],
     ]);
     if (matrimoniales.length > 0)
       secciones.push({ titulo: "Datos Matrimoniales", campos: matrimoniales });
   }
 
-  // ── Datos del Patrocinador ─────────────────────────────────────────────────
   if (cliente.datosPatrocinador) {
     const dpa = cliente.datosPatrocinador;
     const patrocinador = campos([
@@ -139,7 +140,7 @@ function buildSecciones(cliente: ClienteCompleto): Seccion[] {
       ["Trabajo del Patrocinador", fmt(dpa.trabajoPatrocinador)],
       [
         "Inicio Trabajo Patrocinador",
-        fmtDate(dpa.fechaInicioTrabajoPatrocinador),
+        formatDateUTC(dpa.fechaInicioTrabajoPatrocinador),
       ],
       [
         "Salario del Patrocinador",
@@ -153,13 +154,12 @@ function buildSecciones(cliente: ClienteCompleto): Seccion[] {
       });
   }
 
-  // ── Datos de Viaje ─────────────────────────────────────────────────────────
   if (cliente.datosViaje) {
     const dv = cliente.datosViaje;
     const viaje = campos([
       ["Motivo del Viaje", fmt(dv.motivo)],
       ["Lugar de Destino", fmt(dv.lugar)],
-      ["Fecha Tentativa", fmtDate(dv.fechaTentativa)],
+      ["Fecha Tentativa", formatDateUTC(dv.fechaTentativa)],
       ["Tiempo de Estadía", fmt(dv.tiempoEstadia)],
       ["Contacto en Destino", fmt(dv.contactoDestino)],
       ["Dirección del Contacto", fmt(dv.direccionContacto)],
@@ -174,8 +174,8 @@ function buildSecciones(cliente: ClienteCompleto): Seccion[] {
 }
 
 /**
- * Genera y descarga la ficha del cliente en PDF
- * Solo incluye campos con datos — campos vacíos son omitidos
+ * Genera y descarga la ficha del cliente en PDF.
+ * Solo incluye campos con datos — campos vacíos son omitidos.
  */
 export async function descargarFichaClientePdf(
   cliente: ClienteCompleto,
@@ -204,7 +204,6 @@ export async function descargarFichaClientePdf(
     }
   };
 
-  // ── Encabezado ──────────────────────────────────────────────────────────────
   doc.setFillColor(...COLOR_PRIMARIO);
   doc.rect(0, 0, 210, 18, "F");
 
@@ -219,10 +218,10 @@ export async function descargarFichaClientePdf(
     day: "2-digit",
     month: "long",
     year: "numeric",
+    timeZone: "America/La_Paz",
   });
   doc.text(`Emitido: ${fechaEmision}`, MARGEN_DER, 11, { align: "right" });
 
-  // ── Nombre del cliente ──────────────────────────────────────────────────────
   doc.setTextColor(...COLOR_TEXTO);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(14);
@@ -234,7 +233,6 @@ export async function descargarFichaClientePdf(
   doc.line(MARGEN_IZQ, y, MARGEN_DER, y);
   y += 6;
 
-  // ── Secciones ───────────────────────────────────────────────────────────────
   for (const seccion of secciones) {
     checkPageBreak(14);
 
@@ -273,7 +271,6 @@ export async function descargarFichaClientePdf(
     y += 4;
   }
 
-  // ── Pie de página ───────────────────────────────────────────────────────────
   const totalPaginas = (doc as any).internal.pages.length - 1;
   for (let i = 1; i <= totalPaginas; i++) {
     doc.setPage(i);
