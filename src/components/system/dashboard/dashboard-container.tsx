@@ -2,13 +2,7 @@
 
 "use client";
 
-import {
-  addMonths,
-  endOfMonth,
-  format,
-  startOfMonth,
-  subMonths,
-} from "date-fns";
+import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import {
   Calendar,
@@ -35,6 +29,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { DesempenoEquipo } from "@/components/system/dashboard/desempeno-equipo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -55,9 +50,15 @@ import {
   obtenerKpisGenerales,
   obtenerProximasCitas,
   obtenerServiciosPopulares,
+  obtenerUsuariosActivos,
   type ProximaCita,
   type ServicioPopular,
+  type UsuarioSelector,
 } from "@/lib/actions/dashboard/dashboard-actions";
+import {
+  defaultFiltro,
+  FILTROS_RAPIDOS,
+} from "@/lib/utils/dashboard-filtros-rapidos";
 
 const COLORES_GRAFICOS = [
   "#3b82f6",
@@ -70,17 +71,9 @@ const COLORES_GRAFICOS = [
   "#84cc16",
 ];
 
-function defaultFiltro(): FiltroFecha {
-  const hoy = new Date();
-  return {
-    desde: format(startOfMonth(subMonths(hoy, 5)), "yyyy-MM-dd"),
-    hasta: format(endOfMonth(hoy), "yyyy-MM-dd"),
-  };
-}
-
 /**
- * Dashboard para roles con acceso gerencial
- * Implementa patrón Facade para consolidar múltiples fuentes de datos
+ * Dashboard para roles con acceso gerencial.
+ * Implementa patrón Facade para consolidar múltiples fuentes de datos.
  */
 interface DashboardContainerProps {
   nombreUsuario: string;
@@ -97,6 +90,9 @@ export function DashboardContainer({
   const [kpis, setKpis] = useState<KpiGeneral | null>(null);
   const [evolucion, setEvolucion] = useState<EvolucionMensual[]>([]);
   const [usuarios, setUsuarios] = useState<DesempenoUsuario[]>([]);
+  const [usuariosSelector, setUsuariosSelector] = useState<UsuarioSelector[]>(
+    [],
+  );
   const [proximasCitas, setProximasCitas] = useState<ProximaCita[]>([]);
   const [cumpleanos, setCumpleanos] = useState<CumpleanosHoy[]>([]);
   const [estadosTramites, setEstadosTramites] = useState<
@@ -108,7 +104,7 @@ export function DashboardContainer({
 
   const cargar = useCallback(async () => {
     setIsLoading(true);
-    const [kR, eR, uR, cR, bR, etR, spR] = await Promise.all([
+    const [kR, eR, uR, cR, bR, etR, spR, usR] = await Promise.all([
       obtenerKpisGenerales(filtro),
       obtenerEvolucionMensual(filtro),
       obtenerDesempenoUsuarios(filtro),
@@ -116,6 +112,7 @@ export function DashboardContainer({
       obtenerCumpleanosHoy(),
       obtenerDistribucionEstadosTramites(filtro),
       obtenerServiciosPopulares(filtro),
+      obtenerUsuariosActivos(),
     ]);
 
     if (kR.success && kR.data) setKpis(kR.data);
@@ -125,6 +122,7 @@ export function DashboardContainer({
     if (bR.success && bR.data) setCumpleanos(bR.data);
     if (etR.success && etR.data) setEstadosTramites(etR.data);
     if (spR.success && spR.data) setServiciosPopulares(spR.data);
+    if (usR.success && usR.data) setUsuariosSelector(usR.data);
 
     setIsLoading(false);
   }, [filtro]);
@@ -132,30 +130,6 @@ export function DashboardContainer({
   useEffect(() => {
     cargar();
   }, [cargar]);
-
-  const aplicarMesActual = () => {
-    const hoy = new Date();
-    setFiltro({
-      desde: format(startOfMonth(hoy), "yyyy-MM-dd"),
-      hasta: format(endOfMonth(hoy), "yyyy-MM-dd"),
-    });
-  };
-
-  const aplicarUltimos6Meses = () => {
-    const hoy = new Date();
-    setFiltro({
-      desde: format(startOfMonth(subMonths(hoy, 5)), "yyyy-MM-dd"),
-      hasta: format(endOfMonth(hoy), "yyyy-MM-dd"),
-    });
-  };
-
-  const aplicarAnoActual = () => {
-    const hoy = new Date();
-    setFiltro({
-      desde: `${hoy.getFullYear()}-01-01`,
-      hasta: format(endOfMonth(hoy), "yyyy-MM-dd"),
-    });
-  };
 
   return (
     <div className="flex-1 space-y-6 p-8 pt-6">
@@ -173,9 +147,6 @@ export function DashboardContainer({
         <FiltroFechas
           filtro={filtro}
           onFiltroChange={setFiltro}
-          onMesActual={aplicarMesActual}
-          onUltimos6Meses={aplicarUltimos6Meses}
-          onAnoActual={aplicarAnoActual}
           isLoading={isLoading}
         />
       </div>
@@ -185,6 +156,12 @@ export function DashboardContainer({
       ) : (
         <>
           <KpisRow kpis={kpis} />
+
+          <DesempenoEquipo
+            usuarios={usuarios}
+            usuariosSelector={usuariosSelector}
+            filtro={filtro}
+          />
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2">
@@ -201,11 +178,8 @@ export function DashboardContainer({
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <DesempenoUsuariosTable usuarios={usuarios} />
-            <div className="space-y-6">
-              <ProximasCitasList citas={proximasCitas} />
-              <CumpleanosList cumpleanos={cumpleanos} />
-            </div>
+            <ProximasCitasList citas={proximasCitas} />
+            <CumpleanosList cumpleanos={cumpleanos} />
           </div>
         </>
       )}
@@ -218,45 +192,26 @@ export function DashboardContainer({
 function FiltroFechas({
   filtro,
   onFiltroChange,
-  onMesActual,
-  onUltimos6Meses,
-  onAnoActual,
   isLoading,
 }: {
   filtro: FiltroFecha;
   onFiltroChange: (f: FiltroFecha) => void;
-  onMesActual: () => void;
-  onUltimos6Meses: () => void;
-  onAnoActual: () => void;
   isLoading: boolean;
 }) {
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onMesActual}
-          disabled={isLoading}
-        >
-          Este mes
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onUltimos6Meses}
-          disabled={isLoading}
-        >
-          6 meses
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onAnoActual}
-          disabled={isLoading}
-        >
-          Este año
-        </Button>
+      <div className="flex flex-wrap gap-2">
+        {FILTROS_RAPIDOS.map((estrategia) => (
+          <Button
+            key={estrategia.id}
+            variant="outline"
+            size="sm"
+            onClick={() => onFiltroChange(estrategia.calcular())}
+            disabled={isLoading}
+          >
+            {estrategia.etiqueta}
+          </Button>
+        ))}
       </div>
       <div className="flex items-center gap-2">
         <div className="flex flex-col gap-1">
@@ -589,55 +544,6 @@ function ClientesPorRegionChart({
   );
 }
 
-// ─── Desempeño usuarios ───────────────────────────────────────────────────────
-
-function DesempenoUsuariosTable({
-  usuarios,
-}: {
-  usuarios: DesempenoUsuario[];
-}) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-sm font-medium flex items-center gap-2">
-          <Users className="h-4 w-4" />
-          Desempeño del Equipo
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        {usuarios.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-6">
-            Sin datos en el período
-          </p>
-        ) : (
-          <div className="space-y-3">
-            {usuarios.map((u, index) => (
-              <div key={u.id} className="flex items-center gap-3">
-                <div className="flex items-center justify-center w-7 h-7 rounded-full bg-muted text-xs font-bold shrink-0">
-                  {index + 1}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{u.nombre}</p>
-                  <div className="flex gap-3 text-xs text-muted-foreground mt-0.5">
-                    <span>{u.clientesRegistrados} clientes</span>
-                    <span>{u.tramitesGestionados} trámites</span>
-                    <span>{u.citasGestionadas} citas</span>
-                  </div>
-                </div>
-                <div className="text-right shrink-0">
-                  <p className="text-sm font-semibold text-green-600">
-                    {u.ingresosGenerados.toLocaleString("es-BO")} Bs.
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
 // ─── Próximas citas ───────────────────────────────────────────────────────────
 
 function ProximasCitasList({ citas }: { citas: ProximaCita[] }) {
@@ -732,6 +638,11 @@ function SkeletonDashboard() {
         {Array.from({ length: 5 }).map((_, i) => (
           <Skeleton key={`kpi-${i}`} className="h-24" />
         ))}
+      </div>
+      <Skeleton className="h-96" />
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <Skeleton className="lg:col-span-2 h-72" />
+        <Skeleton className="h-72" />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Skeleton className="lg:col-span-2 h-72" />

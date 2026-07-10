@@ -9,7 +9,6 @@ import {
   format,
   startOfDay,
   startOfMonth,
-  subMonths,
 } from "date-fns";
 import { db } from "@/lib/db";
 import type { ActionResult } from "@/types/action-result-types";
@@ -54,6 +53,19 @@ export type DesempenoUsuario = {
   ingresosGenerados: number;
 };
 
+export type HistoricoUsuarioPunto = {
+  mes: string;
+  clientesRegistrados: number;
+  tramitesGestionados: number;
+  citasGestionadas: number;
+  ingresosGenerados: number;
+};
+
+export type UsuarioSelector = {
+  id: string;
+  nombre: string;
+};
+
 export type ProximaCita = {
   id: string;
   fechaHora: Date;
@@ -89,6 +101,65 @@ function buildDateRange(filtro: FiltroFecha) {
   return {
     gte: startOfDay(new Date(filtro.desde)),
     lte: endOfDay(new Date(filtro.hasta)),
+  };
+}
+
+type MetricasUsuario = {
+  clientesRegistrados: number;
+  tramitesGestionados: number;
+  citasGestionadas: number;
+  ingresosGenerados: number;
+};
+
+/**
+ * Calcula las métricas de actividad de un usuario para un rango de fechas dado.
+ * Utilizada tanto por el ranking general como por el histórico mensual individual.
+ */
+async function calcularMetricasUsuario(
+  usuarioId: string,
+  rango: { gte: Date; lte: Date },
+): Promise<MetricasUsuario> {
+  const [
+    clientesRegistrados,
+    tramitesGestionados,
+    citasGestionadas,
+    ingresosServ,
+    ingresosCit,
+  ] = await Promise.all([
+    db.cliente.count({
+      where: { registradoPorId: usuarioId, deletedAt: null, createdAt: rango },
+    }),
+    db.tramite.count({
+      where: {
+        usuarioAsignadoId: usuarioId,
+        deletedAt: null,
+        createdAt: rango,
+      },
+    }),
+    db.cita.count({
+      where: { creadaPorId: usuarioId, deletedAt: null, fechaHora: rango },
+    }),
+    db.clienteServicio.aggregate({
+      where: {
+        deletedAt: null,
+        createdAt: rango,
+        cliente: { registradoPorId: usuarioId },
+      },
+      _sum: { precioFinal: true },
+    }),
+    db.cita.aggregate({
+      where: { creadaPorId: usuarioId, deletedAt: null, fechaHora: rango },
+      _sum: { precioFinal: true },
+    }),
+  ]);
+
+  return {
+    clientesRegistrados,
+    tramitesGestionados,
+    citasGestionadas,
+    ingresosGenerados:
+      Number(ingresosServ._sum.precioFinal ?? 0) +
+      Number(ingresosCit._sum.precioFinal ?? 0),
   };
 }
 
@@ -282,52 +353,11 @@ export async function obtenerDesempenoUsuarios(
     });
 
     const data = await Promise.all(
-      usuarios.map(async (u) => {
-        const [
-          clientesRegistrados,
-          tramitesGestionados,
-          citasGestionadas,
-          ingresosServ,
-          ingresosCit,
-        ] = await Promise.all([
-          db.cliente.count({
-            where: { registradoPorId: u.id, deletedAt: null, createdAt: rango },
-          }),
-          db.tramite.count({
-            where: {
-              usuarioAsignadoId: u.id,
-              deletedAt: null,
-              createdAt: rango,
-            },
-          }),
-          db.cita.count({
-            where: { creadaPorId: u.id, deletedAt: null, fechaHora: rango },
-          }),
-          db.clienteServicio.aggregate({
-            where: {
-              deletedAt: null,
-              createdAt: rango,
-              cliente: { registradoPorId: u.id },
-            },
-            _sum: { precioFinal: true },
-          }),
-          db.cita.aggregate({
-            where: { creadaPorId: u.id, deletedAt: null, fechaHora: rango },
-            _sum: { precioFinal: true },
-          }),
-        ]);
-
-        return {
-          id: u.id,
-          nombre: u.name,
-          clientesRegistrados,
-          tramitesGestionados,
-          citasGestionadas,
-          ingresosGenerados:
-            Number(ingresosServ._sum.precioFinal ?? 0) +
-            Number(ingresosCit._sum.precioFinal ?? 0),
-        };
-      }),
+      usuarios.map(async (u) => ({
+        id: u.id,
+        nombre: u.name,
+        ...(await calcularMetricasUsuario(u.id, rango)),
+      })),
     );
 
     return {
@@ -343,6 +373,54 @@ export async function obtenerDesempenoUsuarios(
   } catch (error) {
     console.error("Error desempeño usuarios:", error);
     return { success: false, error: "Error al obtener desempeño de usuarios" };
+  }
+}
+
+export async function obtenerHistoricoUsuario(
+  usuarioId: string,
+  filtro: FiltroFecha,
+): Promise<ActionResult<HistoricoUsuarioPunto[]>> {
+  try {
+    const inicio = new Date(filtro.desde);
+    const fin = new Date(filtro.hasta);
+    const meses = eachMonthOfInterval({ start: inicio, end: fin });
+
+    const data = await Promise.all(
+      meses.map(async (mes) => {
+        const rangoMes = { gte: startOfMonth(mes), lte: endOfMonth(mes) };
+        const metricas = await calcularMetricasUsuario(usuarioId, rangoMes);
+
+        return {
+          mes: format(mes, "MMM yy"),
+          ...metricas,
+        };
+      }),
+    );
+
+    return { success: true, data };
+  } catch (error) {
+    console.error("Error histórico usuario:", error);
+    return { success: false, error: "Error al obtener histórico del usuario" };
+  }
+}
+
+export async function obtenerUsuariosActivos(): Promise<
+  ActionResult<UsuarioSelector[]>
+> {
+  try {
+    const usuarios = await db.user.findMany({
+      where: { status: "ACTIVE" },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    });
+
+    return {
+      success: true,
+      data: usuarios.map((u) => ({ id: u.id, nombre: u.name })),
+    };
+  } catch (error) {
+    console.error("Error usuarios activos:", error);
+    return { success: false, error: "Error al obtener usuarios activos" };
   }
 }
 
@@ -413,8 +491,8 @@ export async function obtenerCumpleanosHoy(): Promise<
       FROM "Cliente"
       WHERE "deletedAt" IS NULL
         AND "fechaNacimiento" IS NOT NULL
-        AND EXTRACT(MONTH FROM "fechaNacimiento") = ${mes}
-        AND EXTRACT(DAY FROM "fechaNacimiento") = ${dia}
+        AND EXTRACT(MONTH FROM "fechaNacimiento") = $mes
+        AND EXTRACT(DAY FROM "fechaNacimiento") = $dia
       ORDER BY apellidos ASC
     `;
 
