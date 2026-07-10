@@ -6,7 +6,9 @@ import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import type { ActionResult } from "@/types/action-result-types";
 import {
+  type CambiarEstadoPagoFormData,
   type CreateClienteServicioFormData,
+  cambiarEstadoPagoSchema,
   createClienteServicioSchema,
   type UpdateClienteServicioFormData,
   updateClienteServicioSchema,
@@ -201,5 +203,36 @@ export async function obtenerEstadosPago(): Promise<
   } catch (error) {
     console.error("Error al obtener estados de pago:", error);
     return { success: false, error: "Error al obtener estados de pago" };
+  }
+}
+
+export async function cambiarEstadoPagoServicio(
+  clienteServicioId: string,
+  input: CambiarEstadoPagoFormData,
+): Promise<ActionResult<void>> {
+  try {
+    const validated = cambiarEstadoPagoSchema.parse(input);
+
+    const [clienteServicio, estadoPago] = await Promise.all([
+      db.clienteServicio.findUnique({ where: { id: clienteServicioId } }),
+      db.catalogoEstadoPago.findUnique({
+        where: { id: validated.estadoPagoId },
+      }),
+    ]);
+
+    if (!clienteServicio)
+      return { success: false, error: "Servicio no encontrado" };
+    if (!estadoPago)
+      return { success: false, error: "Estado de pago no encontrado" };
+
+    await db.clienteServicio.update({
+      where: { id: clienteServicioId },
+      data: { estadoPagoId: validated.estadoPagoId },
+    });
+
+    return { success: true };
+  } catch (error) {
+    console.error("Error al cambiar estado de pago:", error);
+    return { success: false, error: "Error al cambiar el estado de pago" };
   }
 }

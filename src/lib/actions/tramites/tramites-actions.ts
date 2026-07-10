@@ -29,7 +29,10 @@ export type TramiteListItem = {
     regionId: string;
     regionNombre: string;
   };
+  clienteServicioId: string;
   servicio: { nombre: string; codigo: string };
+  precioServicio: number;
+  estadoPago: { id: string; nombre: string; color: string | null };
   estadoActual: { id: string; nombre: string; color: string | null };
   usuarioAsignado: { id: string; name: string } | null;
 };
@@ -63,7 +66,12 @@ const tramiteSelect = {
     },
   },
   clienteServicio: {
-    select: { servicio: { select: { nombre: true, codigo: true } } },
+    select: {
+      id: true,
+      precioFinal: true,
+      servicio: { select: { nombre: true, codigo: true } },
+      estadoPago: { select: { id: true, nombre: true, color: true } },
+    },
   },
   estadoActual: { select: { id: true, nombre: true, color: true } },
   usuarioAsignado: { select: { id: true, name: true } },
@@ -86,7 +94,10 @@ function mapTramite(raw: any): TramiteListItem {
       regionId: raw.cliente.regionId,
       regionNombre: raw.cliente.region.nombre,
     },
+    clienteServicioId: raw.clienteServicio.id,
     servicio: raw.clienteServicio.servicio,
+    precioServicio: Number(raw.clienteServicio.precioFinal),
+    estadoPago: raw.clienteServicio.estadoPago,
     estadoActual: raw.estadoActual,
     usuarioAsignado: raw.usuarioAsignado,
   };

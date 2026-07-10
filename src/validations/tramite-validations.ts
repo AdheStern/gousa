@@ -59,3 +59,9 @@ export type UpdateTramiteFormData = z.infer<typeof updateTramiteSchema>;
 export type CambiarEstadoTramiteFormData = z.infer<
   typeof cambiarEstadoTramiteSchema
 >;
+
+export const cambiarEstadoPagoSchema = z.object({
+  estadoPagoId: z.string().min(1, "Debes seleccionar un estado de pago"),
+});
+
+export type CambiarEstadoPagoFormData = z.infer<typeof cambiarEstadoPagoSchema>;
